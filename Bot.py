@@ -1,163 +1,431 @@
 import telebot
 from telebot import types
-import threading
-from flask import Flask
-import os
-import subprocess
+import sqlite3
 
-MAIN_BOT_TOKEN = "8902367212:AAEU8M5nnVPvnk30SkJk1iioMMhbX9_Gooc"
-bot = telebot.TeleBot(MAIN_BOT_TOKEN)
-app = Flask(__name__)
+TOKEN = "8902367212:AAEU8M5nnVPvnk30SkJk1iioMMhbX9_Gooc"
 
-# កន្លែងផ្ទុកទិន្នន័យបណ្តោះអាសន្ន (Memory)
-user_states = {} # សម្រាប់តាមដានថា User កំពុង Host ឬ Edit
-running_processes = {} # ផ្ទុក Subprocess របស់ Bot នីមួយៗ
-hosted_files = {} # ផ្ទុកទីតាំង File ដែលបាន Upload
+ADMIN_IDS = [
+    7820849894
+]
 
-# បង្កើតថតសម្រាប់ផ្ទុកកូដដែលគេ Upload
-if not os.path.exists('hosted_bots_dir'):
-    os.makedirs('hosted_bots_dir')
+bot = telebot.TeleBot(TOKEN)
 
-# មុខងារបង្កើត Main Menu Keyboard
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        types.KeyboardButton("🚀 Host Bot"),
-        types.KeyboardButton("📊 Status"),
-        types.KeyboardButton("💎 Plan Host Bot"),
-        types.KeyboardButton("☎️ Support")
+# =========================
+# DATABASE
+# =========================
+
+conn = sqlite3.connect("database.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users(
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    first_name TEXT,
+    plan INTEGER DEFAULT 0
+)
+""")
+
+conn.commit()
+
+# =========================
+# FUNCTIONS
+# =========================
+
+def register_user(user):
+
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO users
+        (user_id, username, first_name)
+        VALUES (?, ?, ?)
+        """,
+        (
+            user.id,
+            user.username,
+            user.first_name
+        )
     )
+
+    conn.commit()
+
+
+def get_plan(user_id):
+
+    cursor.execute(
+        "SELECT plan FROM users WHERE user_id=?",
+        (user_id,)
+    )
+
+    data = cursor.fetchone()
+
+    if data:
+        return data[0]
+
+    return 0
+
+
+def set_plan(user_id, amount):
+
+    cursor.execute(
+        """
+        UPDATE users
+        SET plan=?
+        WHERE user_id=?
+        """,
+        (
+            amount,
+            user_id
+        )
+    )
+
+    conn.commit()
+
+
+def menu():
+
+    markup = types.ReplyKeyboardMarkup(
+        resize_keyboard=True
+    )
+
+    markup.add(
+        "💰 Balance",
+        "💎 My Plan"
+    )
+
+    markup.add(
+        "📊 Statistics"
+    )
+
     return markup
 
-# ពេលចុច /start
+
+# =========================
+# START
+# =========================
+
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "សួស្តី! សូមស្វាគមន៍មកកាន់ប្រព័ន្ធ Hosting Bot 🤖", reply_markup=main_menu())
 
-# គ្រប់គ្រងពេល User ចុចប៊ូតុងនៅលើ Keyboard
-@bot.message_handler(func=lambda message: message.text in ["🚀 Host Bot", "📊 Status", "💎 Plan Host Bot", "☎️ Support"])
-def handle_menu(message):
-    chat_id = message.chat.id
-    text = message.text
+    register_user(message.from_user)
 
-    if text == "💎 Plan Host Bot":
-        # បង្កើត Inline Button សម្រាប់ Owner
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/gito_kanxo"))
-        
-        plan_text = (
-            "📋 **តារាងតម្លៃ Hosting Bot:**\n\n"
-            "🔹 Hosting 1 bot = 1.25$\n"
-            "🔹 Hosting 5 bots = 4.50$\n"
-            "🔹 Hosting 10 bots = 8$\n\n"
-            "សូមទាក់ទង Owner ដើម្បីទិញកញ្ចប់ ⬇️"
+    text = f"""
+👋 Welcome {message.from_user.first_name}
+
+🤖 Plan Manager Bot
+
+សូមជ្រើសរើស Menu ខាងក្រោម
+"""
+
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=menu()
+    )
+
+
+# =========================
+# BALANCE
+# =========================
+
+@bot.message_handler(func=lambda m: m.text == "💰 Balance")
+def balance(message):
+
+    plan = get_plan(
+        message.from_user.id
+    )
+
+    text = f"""
+👤 Name : {message.from_user.first_name}
+
+🆔 ID : {message.from_user.id}
+
+💎 Plan : {plan}
+"""
+
+    bot.send_message(
+        message.chat.id,
+        text
+    )
+
+
+# =========================
+# MY PLAN
+# =========================
+
+@bot.message_handler(func=lambda m: m.text == "💎 My Plan")
+def myplan(message):
+
+    plan = get_plan(
+        message.from_user.id
+    )
+
+    if plan <= 0:
+
+        bot.send_message(
+            message.chat.id,
+            "❌ You don't have any plan."
         )
-        bot.send_message(chat_id, plan_text, reply_markup=markup, parse_mode='Markdown')
 
-    elif text == "☎️ Support":
-        bot.send_message(chat_id, "សម្រាប់ការគាំទ្រ និងជំនួយ សូមទាក់ទងមកកាន់ @gito_kanxo អរគុណ!")
+        return
 
-    elif text == "🚀 Host Bot":
-        user_states[chat_id] = "waiting_for_host_file"
-        bot.send_message(chat_id, "📂 សូមផ្ញើ File កូដ Bot របស់អ្នក (`.py`) មកកាន់ខ្ញុំ ដើម្បីធ្វើការ Hosting។", parse_mode='Markdown')
+    bot.send_message(
+        message.chat.id,
+        f"✅ Your Plan = {plan}"
+    )
 
-    elif text == "📊 Status":
-        if chat_id in running_processes or chat_id in hosted_files:
-            markup = types.InlineKeyboardMarkup(row_width=2)
-            # ប៊ូតុង Start, Stop, Edit
-            btn_start = types.InlineKeyboardButton("▶️ Start", callback_data="start_bot")
-            btn_stop = types.InlineKeyboardButton("⏹ Stop", callback_data="stop_bot")
-            btn_edit = types.InlineKeyboardButton("✏️ Edit", callback_data="edit_bot")
-            markup.add(btn_start, btn_stop, btn_edit)
-            
-            status_text = "🟢 កំពុងដំណើរការ" if chat_id in running_processes else "🔴 បានបញ្ឈប់"
-            bot.send_message(chat_id, f"📊 **ស្ថានភាព Bot របស់អ្នក:**\nស្ថានភាព: {status_text}", reply_markup=markup, parse_mode='Markdown')
-        else:
-            bot.send_message(chat_id, "⚠️ អ្នកមិនទាន់មាន Bot កំពុង Host នៅឡើយទេ។ សូមចុច 🚀 Host Bot។")
 
-# គ្រប់គ្រងពេល User Upload File (.py)
-@bot.message_handler(content_types=['document'])
-def handle_document(message):
-    chat_id = message.chat.id
-    state = user_states.get(chat_id)
+# =========================
+# STATS
+# =========================
 
-    if state in ["waiting_for_host_file", "waiting_for_edit_file"]:
+@bot.message_handler(func=lambda m: m.text == "📊 Statistics")
+def stats(message):
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM users"
+    )
+
+    total_users = cursor.fetchone()[0]
+
+    bot.send_message(
+        message.chat.id,
+        f"👥 Total Users : {total_users}"
+    )
+
+
+# =========================
+# ADMIN ADD PLAN
+# =========================
+
+@bot.message_handler(commands=['addplan'])
+def addplan(message):
+
+    if message.from_user.id not in ADMIN_IDS:
+
+        bot.reply_to(
+            message,
+            "❌ Admin Only"
+        )
+
+        return
+
+    try:
+
+        args = message.text.split()
+
+        if len(args) != 3:
+
+            bot.reply_to(
+                message,
+                """
+Usage:
+
+/addplan USER_ID AMOUNT
+
+Example:
+
+/addplan 123456789 5
+"""
+            )
+
+            return
+
+        user_id = int(args[1])
+        amount = int(args[2])
+
+        current = get_plan(
+            user_id
+        )
+
+        new_plan = current + amount
+
+        set_plan(
+            user_id,
+            new_plan
+        )
+
+        bot.reply_to(
+            message,
+            f"""
+✅ Plan Added
+
+👤 User : {user_id}
+
+💎 Added : {amount}
+
+📦 Total : {new_plan}
+"""
+        )
+
         try:
-            # ពិនិត្យមើលថាតើវាជា file Python ដែរឬទេ
-            file_name = message.document.file_name
-            if not file_name.endswith('.py'):
-                bot.reply_to(message, "❌ សូមផ្ញើតែ File ដែលមានកន្ទុយ `.py` ប៉ុណ្ណោះ!")
-                return
 
-            bot.reply_to(message, "⏳ កំពុងពិនិត្យ និងទាញយក File របស់អ្នក...")
-            
-            # ទាញយក File
-            file_info = bot.get_file(message.document.file_id)
-            downloaded_file = bot.download_file(file_info.file_path)
-            
-            # រក្សាទុក File ចូលក្នុង Server
-            save_path = f"hosted_bots_dir/{chat_id}_{file_name}"
-            with open(save_path, 'wb') as new_file:
-                new_file.write(downloaded_file)
-            
-            hosted_files[chat_id] = save_path
-            
-            # បើកំពុង Edit ត្រូវ Stop Bot ចាស់សិន
-            if state == "waiting_for_edit_file" and chat_id in running_processes:
-                running_processes[chat_id].terminate()
-                del running_processes[chat_id]
-            
-            # រត់ (Run) File កូដថ្មីដោយប្រើ Subprocess
-            process = subprocess.Popen(['python', save_path])
-            running_processes[chat_id] = process
-            
-            user_states[chat_id] = None # លុប State ចោលវិញ
-            
-            bot.send_message(chat_id, "✅ File ត្រូវបាន Upload និងដំណើរការដោយជោគជ័យ! ចុច 📊 Status ដើម្បីគ្រប់គ្រងវា។")
-            
-        except Exception as e:
-            bot.reply_to(message, f"❌ មានបញ្ហាក្នុងការ Upload/Run: {str(e)}")
-    else:
-        bot.reply_to(message, "តើអ្នកចង់ធ្វើអ្វី? សូមចុចប៊ូតុងនៅលើ Menu សិន។")
+            bot.send_message(
+                user_id,
+                f"""
+🎉 Admin Added Plan
 
-# គ្រប់គ្រង Inline Buttons (Start, Stop, Edit)
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    chat_id = call.message.chat.id
-    
-    if call.data == "stop_bot":
-        if chat_id in running_processes:
-            running_processes[chat_id].terminate()
-            del running_processes[chat_id]
-            bot.answer_callback_query(call.id, "✅ Bot ត្រូវបានបញ្ឈប់!")
-            bot.edit_message_text("🔴 Bot របស់អ្នកត្រូវបានបញ្ឈប់។", chat_id, call.message.message_id)
-        else:
-            bot.answer_callback_query(call.id, "⚠️ Bot មិនកំពុងដំណើរការទេ។", show_alert=True)
-            
-    elif call.data == "start_bot":
-        if chat_id not in running_processes and chat_id in hosted_files:
-            file_path = hosted_files[chat_id]
-            process = subprocess.Popen(['python', file_path])
-            running_processes[chat_id] = process
-            bot.answer_callback_query(call.id, "✅ Bot ចាប់ផ្តើមដំណើរការវិញហើយ!")
-            bot.edit_message_text("🟢 Bot របស់អ្នកកំពុងដំណើរការឡើងវិញ។", chat_id, call.message.message_id)
-        else:
-            bot.answer_callback_query(call.id, "⚠️ Bot កំពុងដំណើរការស្រាប់ ឬគ្មាន File ទេ។", show_alert=True)
-            
-    elif call.data == "edit_bot":
-        user_states[chat_id] = "waiting_for_edit_file"
-        bot.answer_callback_query(call.id, "ត្រៀម Edit Bot")
-        bot.send_message(chat_id, "✏️ សូមផ្ញើ File កូដ (`.py`) ថ្មីរបស់អ្នកមកកាន់ខ្ញុំ ដើម្បីធ្វើការជំនួស (Auto Replace & Restart)។")
+💎 Added : {amount}
 
-# Web Route សម្រាប់ Render ធ្វើការ Health Check
-@app.route('/')
-def index():
-    return "Pro Hosting Bot is Running!"
+📦 Total : {new_plan}
+"""
+            )
 
-def run_main_bot():
-    bot.polling(none_stop=True)
+        except:
+            pass
 
-if __name__ == "__main__":
-    threading.Thread(target=run_main_bot).start()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    except Exception as e:
+
+        bot.reply_to(
+            message,
+            f"❌ Error\n{e}"
+        )
+
+
+# =========================
+# ADMIN REMOVE PLAN
+# =========================
+
+@bot.message_handler(commands=['removeplan'])
+def removeplan(message):
+
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+
+        args = message.text.split()
+
+        if len(args) != 3:
+            return
+
+        user_id = int(args[1])
+        amount = int(args[2])
+
+        current = get_plan(user_id)
+
+        new_plan = max(
+            0,
+            current - amount
+        )
+
+        set_plan(
+            user_id,
+            new_plan
+        )
+
+        bot.reply_to(
+            message,
+            f"""
+✅ Plan Removed
+
+👤 User : {user_id}
+
+💎 Total : {new_plan}
+"""
+        )
+
+    except Exception as e:
+
+        bot.reply_to(
+            message,
+            str(e)
+        )
+
+
+# =========================
+# ADMIN USERS
+# =========================
+
+@bot.message_handler(commands=['users'])
+def users(message):
+
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    cursor.execute(
+        """
+        SELECT
+        user_id,
+        first_name,
+        username,
+        plan
+        FROM users
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    if not rows:
+
+        bot.send_message(
+            message.chat.id,
+            "No Users"
+        )
+
+        return
+
+    text = "👥 USERS LIST\n\n"
+
+    for row in rows:
+
+        user_id = row[0]
+        name = row[1]
+        username = row[2]
+        plan = row[3]
+
+        text += f"""
+👤 {name}
+
+🆔 {user_id}
+
+📛 @{username}
+
+💎 {plan}
+
+----------------
+"""
+
+    if len(text) > 4000:
+        text = text[:4000]
+
+    bot.send_message(
+        message.chat.id,
+        text
+    )
+
+
+# =========================
+# ADMIN PLANS
+# =========================
+
+@bot.message_handler(commands=['plans'])
+def plans(message):
+
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    cursor.execute(
+        """
+        SELECT
+        COUNT(*)
+        FROM users
+        WHERE plan > 0
+        """
+    )
+
+    total = cursor.fetchone()[0]
+
+    bot.send_message(
+        message.chat.id,
+        f"💎 Users With Plan : {total}"
+    )
+
+
+# =========================
+# RUN BOT
+# =========================
+
+print("Bot Running...")
+
+bot.infinity_polling()
